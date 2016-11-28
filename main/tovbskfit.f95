@@ -27,13 +27,14 @@
   !112 format('rho_c [g/cm^3]  R [km]  M [MSun]')
       !end
       
-      subroutine TOVINT(RHOC, KEOS, EPSMASS, R6, SMASS, length, outputFile)
+      subroutine TOVINT(RHOC, KEOS, isDeep, EPSMASS, R6, SMASS, length, outputFile)
 !                                                       Version 14.03.13
 ! Integration of the Tolman-Oppenheimer-Volkoff equation
 !   with the fit to one of the equations of state BSk19, BSk20, or BSk21
 !   from the stellar center with mass density RHOC .
 ! Input: RHOC - central grav.mass density [g/cc]
 !        KEOS=19,20,21 - EOS number
+!        isDeep - "1", if the model estimated to 10^{10} g/cc, "2", if the model estimated to 10^{8} g/cc
 !        EPSMASS - relative accuracy in total stellar mass SMASS
 ! Output: R6 - stellar radius [10^6 cm]
 !         SMASS - stellar mass / MSun
@@ -41,11 +42,19 @@
       
       integer, parameter :: fout = 101 
       character(*) :: outputFile
+      integer(4) :: isDeep
       integer(4) :: length
       
       parameter (EPS = .001d0, EPS1 = .05d0)
       real*8 buffer(3, 4) ! r, rho, m_{r}
       
+      real(8) :: surfaceRho
+      
+      if (isDeep .eq. 1) then
+          surfaceRho = 1.0d+10
+      else
+          surfaceRho = 1.0d+8
+      endif
       open(fout, file = outputFile)
       
       length = 1
@@ -152,7 +161,7 @@
       DELTA = dmax1(dabs(RHO - RHO1) / RHO,(SMASS - SMASS1) / SMASS)
       if (DELTA .lt. EPSMASS) then ! sufficient accuracy
          do i = 1, 4
-            if (buffer(2, i) > 1.0d+10) then
+            if (buffer(2, i) > surfaceRho) then
                 length = length + 1 
                 write(fout, '(e22.15, 5x, e22.15, 5x, e22.15)') buffer(1, i), buffer(2, i), buffer(3, i)
             end if

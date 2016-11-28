@@ -64,12 +64,13 @@ contains
     subroutine makeSolution()
         ! for Windows
         character(len = 50) :: heatOutputfile = 'outputData\\heatResult.txt'
+        character(len = 50) :: outputfileForFlux = 'outputData\\resultFlux.txt'
         ! for Unix
         !character(len = 50) :: heatOutputfile = 'outputData//heatResult.txt'
         
         call constructSHEFromFile(hE, fileForHeatEquation)
         call hESolution(hE, conductivity03, sources03, capacity03, beta03, getSurfaceTemperatureFromBeta02, & 
-                        relativisticFactors03, heatOutputfile)
+                        relativisticFactors03, heatOutputfile, outputfileForFlux)
         
     end subroutine
 

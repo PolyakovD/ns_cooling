@@ -6,8 +6,8 @@ module tridiagonal
     type, public :: tridiagonalMatrix
         logical, private :: isInit = .false.
         integer, private :: mSize
-        real(8), private, allocatable, dimension(:,:) :: table
-        real(8), private, allocatable, dimension(:) :: rightPart
+        real(8), private, allocatable :: table(:,:)
+        real(8), private, allocatable :: rightPart(:)
     end type tridiagonalMatrix
     
 contains
@@ -24,8 +24,9 @@ contains
         tM%isInit = .true.
     end subroutine tMConstructor
 	
+    ! solve the tridiagonal system and free tM for reuse
     function tMSolution(tM) 
-        real(8), allocatable, dimension(:) :: tMSolution 
+        real(8), allocatable :: tMSolution(:) 
         type(tridiagonalMatrix) :: tM
     
         integer(4) i, newSize

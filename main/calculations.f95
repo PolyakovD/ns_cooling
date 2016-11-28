@@ -54,7 +54,7 @@ contains
             if (upperR < bottomR) then
                 stop 'Calculations: upperR and bottomR must satisfy: upperR >= bottomR'
             end if
-            simpleIntegral = 4.0d0 / 3.0d0 * M_PI * (upperR**(3.0d0) - bottomR**(3.0d0)) 
+            simpleIntegral = 4.0d0 / 3.0d0 * M_PI * (upperR**3 - bottomR**3) 
         end function
             
     end function

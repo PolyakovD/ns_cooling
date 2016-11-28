@@ -10,98 +10,84 @@ implicit none
     ! initial conditions
     integer(4), private :: spatialKnotsNumber
     
-    real(8), private :: sigma, t0
+    real(8), private :: sigma, t0, initialTau
 
-    real(8), private, allocatable, dimension(:) :: spatialKnots
-    real(8), private, allocatable, dimension(:) :: initialCondition
-    
-    ! step conditions
-    integer(4), private :: stepNumbers 
-    integer(4), private :: timePeriodsNumber
-    
-    real(8), private, allocatable, dimension(:) :: timePeriods
-    integer(4), private, allocatable, dimension(:) :: numbersOfPeriods
+    real(8), private, allocatable :: spatialKnots(:)
+    real(8), private, allocatable :: rhoDistribution(:)
+    real(8), private, allocatable :: initialCondition(:)
     
     ! output conditions
-    integer(4), private :: sectionsNumber
-    integer(4), private, allocatable, dimension(:) :: sections
+    integer(4), private :: outputSectionsNumber ! number of output sections
     
-    private :: setSHEParametersFromFile
+    real(8), allocatable :: outputSectionsTime(:) ! time of output sections
     
 contains 
-
+    
+    ! prepares difference scheme from file
     subroutine constructSHEFromFile(hE, inputfile)
         type(heatEquation) :: hE
         character(*) :: inputfile ! This file contains weight -- sigma, T_{init} -- initial temperature of star 
-                                  ! and model grid (number of knots and their coordinates)
+                                  ! and model grid (number of knots and their coordinates and rhoDistribution)
         
-        call setSHEParametersFromFile(hE, inputfile)
+        call setSHEParametersFromFile()
         
-    end subroutine
+        contains
+        
+        subroutine setSHEParametersFromFile()            
+            integer(4) :: spatialKnotsNumber   
+            character(len = 50) :: outputParameters = 'inputData\\outputParameters.txt'
             
-    subroutine setSHEParametersFromFile(hE, inputfile)
-        type(heatEquation) :: hE
-        character(*) :: inputfile ! This file contains weight -- sigma, t_{o} -- initial time 
-                                  ! and model grid (number of knots and their coordinates and temperature)
+            integer(4) :: i
+            real(8) :: prevTimePoint, timePoint, years, days, seconds
+            
+            open(fin, file = inputfile)
         
-        integer(4) :: spatialKnotsNumber   
-        character(len = 50) :: outputParameters = 'inputData\\outputParameters.txt'
+            read(fin, *) sigma, initialTau
+            read(fin, *) spatialKnotsNumber, t0
+            
+            ! Let's read initial condition
+            allocate(spatialKnots(spatialKnotsNumber), initialCondition(spatialKnotsNumber), & 
+                     rhoDistribution(spatialKnotsNumber))
+            
+            do i = 1, spatialKnotsNumber
+                read(fin, *) spatialKnots(i), rhoDistribution(i), initialCondition(i)
+            end do
+            
+            close(fin)
+            
+            ! Let's read output parameters 
+            open(finSection, file = outputParameters)
+            
+            read(finSection, *) outputSectionsNumber
+            allocate(outputSectionsTime(outputSectionsNumber))
+            
+            do i = 1, outputSectionsNumber
+                read(finSection, *) years, days, seconds
+                outputSectionsTime(i) = seconds + days * DAY_IN_SECONDS + years * YEAR_IN_SECONDS 
+            end do
+            
+            close(finSection)
+            
+            call setSHEInitialConditions(hE, spatialKnotsNumber, sigma, t0, initialTau, spatialKnots, & 
+                                         rhoDistribution, initialCondition) 
+            ! call setSHEStepConditions(hE, stepNumbers, timePeriodsNumber, timePeriods, numbersOfPeriods)
+            call setSHEOutputConditions(hE, outputSectionsNumber, outputSectionsTime)
         
-        integer(4) :: i
-        real(8) :: prevTimePoint, timePoint, years, days, seconds
+        end subroutine
         
-        open(fin, file = inputfile)
-	
-        read(fin, *) sigma
-        read(fin, *) spatialKnotsNumber, t0
-        
-        ! Let's read initial condition
-        allocate(spatialKnots(spatialKnotsNumber))
-        allocate(initialCondition(spatialKnotsNumber))
-        
-        do i = 1, spatialKnotsNumber
-            read(fin, *) spatialKnots(i), initialCondition(i)
-        end do
-        
-        close(fin)
-        
-        ! Let's read grid parameters 
-        open(finSection, file = outputParameters)
-        
-        read(finSection, *) timePeriodsNumber
-        allocate(timePeriods(timePeriodsNumber))
-        allocate(numbersOfPeriods(timePeriodsNumber))
-        
-        sectionsNumber = timePeriodsNumber + 1
-        allocate(sections(sectionsNumber))
-        
-        stepNumbers = 1
-        sections(1) = stepNumbers
-		prevTimePoint = t0
-        do i = 1, timePeriodsNumber
-            read(finSection, *) years, days, seconds, numbersOfPeriods(i)
-    
-            stepNumbers = stepNumbers + numbersOfPeriods(i)
-            sections(i + 1) = stepNumbers
-			timePoint = seconds + days * DAY_IN_SECONDS + years * YEAR_IN_SECONDS 
-            timePeriods(i) = (timePoint - prevTimePoint) / numbersOfPeriods(i)
-            prevTimePoint = timePoint           
-        end do
-        
-        close(finSection)
-        
-        call setSHEInitialConditions(hE, spatialKnotsNumber, sigma, t0, spatialKnots, initialCondition) 
-        call setSHEStepConditions(hE, stepNumbers, timePeriodsNumber, timePeriods, numbersOfPeriods)
-        call setSHEOutputConditions(hE, sectionsNumber, sections)
-    
     end subroutine
 	
+    ! prints solution 
+    ! Input: hE - our model
+    !        outputFile - path of outputFile
+    !        isAppend == TRUE --> appends result to file
+    !        isAppend == FALSE --> rewrite file
 	subroutine printHESolution(hE, outputFile, isAppend)
         type(heatEquation) :: hE
         character(*) :: outputFile
         logical :: isAppend  
         
-        real(8) :: timeOfSections(sectionsNumber), outputSections(spatialKnotsNumber, sectionsNumber)
+        real(8) :: outputSections(spatialKnotsNumber, outputSectionsNumber)
         
         integer(4) :: i, j
         
@@ -111,13 +97,12 @@ contains
             open(fout, file = outputFile)
         end if
         
-        timeOfSections = getSHETimeOfSections(hE)
         outputSections = getSHEOutputSections(hE)
         
-        write(fout, '(i8)') sectionsNumber
-        do i = 1, sectionsNumber
+        write(fout, '(i8)') outputSectionsNumber
+        do i = 1, outputSectionsNumber
             do j = 1, spatialKnotsNumber
-                write(fout, '(e19.7, e19.8, e19.8)') timeOfSections(i), spatialKnots(j), outputSections(j, i)
+                write(fout, '(e19.7, e19.8, e19.8)') outputSectionsTime(i), spatialKnots(j), outputSections(j, i)
             end do
         end do
         close(fout)

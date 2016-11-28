@@ -1,4 +1,6 @@
 module neutrinos
+
+implicit none
    
     real(8), private, parameter :: PI = 3.14159265d0
     real(8), private, parameter :: DECLN = 2.302585093d0
@@ -64,7 +66,7 @@ contains
           7. * (PHI0 * Up1 + PHIp1 * U0) + 5. *(PHI0 * Um1 + PHIm1 * U0)
       Q = Cplus2 * Q + 9. * Cmin2 * (PHI0 * (Up1 + Um1) + (PHIm1 + PHIp1) * U0)
       Qpair = Qc0 * Q
-      return
+      !return
       end subroutine
         
       subroutine SINQpl(X, T, Qpl)
@@ -80,7 +82,7 @@ contains
       Y = dsqrt(1.d0 + X**2)
       fp = dsqrt(Cfp * X**3 / Y) / T
       Qpl = Qc1 * T**9 * fp**6 * (16.23 + 4.604 * dsqrt(fp) * fp) * dexp(-fp)
-      return
+      !return
       end subroutine
 
       subroutine SINQsyn(X, T, B12, Qsyn)
@@ -111,7 +113,7 @@ contains
       SBC = dexp(-z / 2.) * (1. + z * (.4228 + z * (.1014 + z * .00624))) / &
            (1. + .4535 * z**TwoThird + z * (.03008 + z * (-.05043 + z * .004314)))
       Qsyn = QsynB * SAB * SBC
-      return
+      !return
       end subroutine
 
     subroutine SINQbr(RHO, T6, Qbr)
@@ -135,7 +137,7 @@ contains
     QbrLG = 11.204 + 7.304 * TAU+ .2976 * R -.37 * TAU2 + .188 * TAU * R - .103 * R2 + &
             .0547 * TAU2 * R - 6.77 * dlog10(1.d0 + .228 * RHO / 2.8d14)
     Qbr = 10.d0**QbrLG
-    return
+    !return
     end subroutine
     
     ! Neutrino emission due to nucleon direct Urka process: YKGH(2001):Eq.(120)
@@ -145,7 +147,7 @@ contains
 	!        RD - superfluid reduction factor
     ! Output: QDUP - neutrino emission rate in erg/(s cm^3)
     subroutine getQDUP(nE, T9, EFMp, EFMn, RD, QDUP)
-        implicit none
+        !implicit none
         real(8) :: nE, T9, EFMp, EFMn, RD
         real(8) :: QDUP
         QDUP = RD * 4.0d27 * (nE / N0)**(1.0d0 / 3.0d0) * EFMn * EFMp * M_P / M_N * T9**(6.0d0)
@@ -161,7 +163,7 @@ contains
 	!        RMp - superfluid reduction factor for proton branch
     ! Output: QMUP - neutrino emission rate in erg/(s cm^3)
     subroutine getQMUP(nP, T9, EFMp, EFMn, pFE, pFP, pFN, RMn, RMp, QMUP)
-        implicit none
+        !implicit none
         real(8) :: nP, T9, EFMp, EFMn, pFE, pFP, pFN, RMn, RMp 
         real(8) :: QMUP
         real(8), parameter :: alphaN = 1.13d0, betaN = 0.68d0 
@@ -179,7 +181,7 @@ contains
 	!        Rnn, Rnp, Rpp - superfluid reduction factor for nn, np, pp collisions, respectively
     ! Output: QBBR - neutrino emission rate in erg/(s cm^3)
     subroutine getQBBR(nN, nP, T9, EFMn, EFMp, Rnn, Rnp, Rpp, QBBR)
-        implicit none
+        !implicit none
         real(8) :: nN, nP, T9, EFMp, EFMn, Rnn, Rnp, Rpp
         real(8) :: QBBR
         real(8), parameter :: alphaNN = 0.59d0, alphaNP = 1.06d0, alphaPP = 0.11d0
@@ -204,7 +206,7 @@ contains
     !        pFN - neutron Fermi momentum
     ! Output: QCPCoreNN - neutrino emission rate in erg/(s cm^3)
     subroutine getQCPCoreNN(T, TCN, EFMn, pFN, QCPCoreNN)
-        implicit none
+        !implicit none
         real(8) :: T, TCN, EFMn, pFN
         real(8) :: QCPCoreNN
         
@@ -234,7 +236,7 @@ contains
     !        xnuc - nuclear size parameter = R_{eff} / R_{WS}
     ! Output: QCPCrustNN - neutrino emission rate in erg/(s cm^3)
     subroutine getQCPCrustNN(T, TCN, EFMn, pFN, xnuc, QCPCrustNN)
-        implicit none
+        !implicit none
         real(8) :: T, TCN, EFMn, pFN, xnuc
         real(8) :: QCPCrustNN
         
@@ -259,11 +261,11 @@ contains
     ! YKGH(2001): (236), (238), (241)
     ! Input: T - temperature
     !        TCP - proton superfluidity temperature
-    !        EFMp - effective proton mass factor (mN*/mN)   
+    !        EFMp - effective proton mass factor (mP*/mP)   
     !        pFP - proton Fermi momentum
     ! Output: QCPCorePP - neutrino emission rate in erg/(s cm^3)
     subroutine getQCPCorePP(T, TCP, EFMp, pFP, QCPCorePP)
-        implicit none
+        !implicit none
         real(8) :: T, TCP, EFMp, pFP
         real(8) :: QCPCorePP
         
@@ -290,7 +292,7 @@ contains
     ! Input: T - temperature in K
     !        Tc - critical temperature in K
     function dimensionlessGapA(T, Tc)
-        implicit none
+        !implicit none
         real(8) :: dimensionlessGapA
         
         real(8) :: T, Tc
@@ -306,7 +308,7 @@ contains
     ! Input: T - temperature in K
     !        Tc - critical temperature in K
     function dimensionlessGapB(T, Tc)
-        implicit none
+        !implicit none
         real(8) :: dimensionlessGapB
         
         real(8) :: T, Tc
@@ -322,7 +324,7 @@ contains
     ! Input: T - temperature in K
     !        Tc - critical temperature in K
     function dimensionlessGapC(T, Tc)
-        implicit none
+        !implicit none
         real(8) :: dimensionlessGapC
         
         real(8) :: T, Tc
@@ -361,14 +363,14 @@ contains
 	! Tcp - critical temperature for proton superfluidity
 	! Tcn - critical temperature for neutron superfluidity
     subroutine superfluidReductionFactors(T, Tcp, Tcn, RD, RMn, RMp, Rnn, Rnp, Rpp)
-        implicit none
+        !implicit none
         real(8) :: RD, RMn, RMp, Rnn, Rnp, Rpp ! output
         
         real(8) :: T, Tcp, Tcn !input
         
         real(8) :: nuP, nuN
-		real(8) :: Rba, Rnb, Rb ! for Eq.(225), Eq.(226)
-		real(8) :: Rpa, Ra      ! for Eq.(226)
+        real(8) :: Rba, Rnb, Rb ! for Eq.(225), Eq.(226)
+        real(8) :: Rpa, Ra      ! for Eq.(226)
         
         if (Tcp + 1.0d-10 < T) then
             ! neutron superfluidity
@@ -385,6 +387,9 @@ contains
                 RD = 1.0d0
 				RMn = 1.0d0
 				RMp = 1.0d0
+                Rnn = 1.0d0
+				Rnp = 1.0d0
+				Rpp = 1.0d0
             end if
         else 
             ! neutron and proton superfluidity
@@ -446,19 +451,18 @@ contains
 				Rnp = pSFBremNPR(nuP)
 				Rpp = pSFBremPPR(nuP)
             end if
-        end if
-		
+        end if	
     end subroutine
 	
 	function nSFDurcaR(nuN)
-        implicit none
+        !implicit none
 		real(8) :: nSFDurcaR, nuN
 		nSFDurcaR = (0.2546 + DSQRT((0.7454d0)**(2.0d0) + (0.1284d0 * nuN)**(2.0d0)))**(5.0d0) * &
                     DEXP(2.701d0 - DSQRT(2.701**(2.0d0) + nuN**(2.0d0)))
 	end function
 	
 	function npSFDurcaR(nuN, nuP)
-        implicit none
+        !implicit none
         real(8) :: npSFDurcaR, nuN, nuP
         real(8) :: candidate1, candidate2
 		
@@ -475,84 +479,88 @@ contains
         end if
 	end function
 	
-	function pSFDurcaR(nuP)
-        implicit none
+    function pSFDurcaR(nuP)
+        !implicit none
 		real(8) :: pSFDurcaR, nuP
 		pSFDurcaR = (0.2312d0 + DSQRT(0.7688d0**(2.0d0) + (0.1438d0 * nuP)**(2.0d0)))**(5.5d0) * &
                     DEXP(3.427d0 - DSQRT(3.427d0**(2.0d0) + nuP**(2.0d0)))
-	end function
+    end function
 	
-	function nSFMurcaPR(nuN)
-        implicit none
+    ! YKGH(2001): Eq.(215)
+    function nSFMurcaPR(nuN)
+        !implicit none
 		real(8) :: nSFMurcaPR, nuN
 		real(8) :: a, b
 		
-		a = 0.1612d0 + DSQRT(0.8388d0**(2.0d0) + (0.1117d0 * nuN)**(2.0d0))
-		b = 0.1612d0 + DSQRT(0.8388d0**(2.0d0) + (0.1274d0 * nuN)**(2.0d0))
-		nSFMurcaPR = (a**(7.0d0) + b**(5.0d0)) / 2.0d0 * & 
-					 DEXP(2.398d0 - DSQRT(2.398d0**(2.0d0) + nuN**(2.0d0)))
+		a = 0.1612d0 + DSQRT(0.8388d0**2 + (0.1117d0 * nuN)**2)
+		b = 0.1612d0 + DSQRT(0.8388d0**2 + (0.1274d0 * nuN)**2)
+		nSFMurcaPR = (a**7 + b**5) / 2.0d0 * & 
+					 DEXP(2.398d0 - DSQRT(2.398d0**2 + nuN**2))
 	end function
 	
+    ! YKGH(2001): Eq.(227) refers to Eq.(212)
 	function nSFMurcaNR(nuN)
-        implicit none
+        !implicit none
 		real(8) :: nSFMurcaNR, nuN
-		nSFMurcaNR = (0.2414d0 + DSQRT(0.7586d0**(2.0d0) + (0.1318d0 * nuN)**(2.0d0)))**(7.0d0) * &
-					 DEXP(5.339d0 - DSQRT(5.339d0**(2.0d0) + (2.0d0 * nuN)**(2.0d0)))
+		nSFMurcaNR = (0.2414d0 + DSQRT(0.7586d0**2 + (0.1318d0 * nuN)**2))**7 * &
+					 DEXP(5.339d0 - DSQRT(5.339d0**2 + (2 * nuN)**2))
 	end function
 	
+    ! YKGH(2001): Eq.(212)
 	function pSFMurcaPR(nuP)
-        implicit none
+        !implicit none
 		real(8) :: pSFMurcaPR, nuP
-		pSFMurcaPR = (0.2414d0 + DSQRT(0.7586d0**(2.0d0) + (0.1318d0 * nuP)**(2.0d0)))**(7.0d0) * &
-					 DEXP(5.339d0 - DSQRT(5.339d0**(2.0d0) + (2.0d0 * nuP)**(2.0d0)))
+		pSFMurcaPR = (0.2414d0 + DSQRT(0.7586d0**2 + (0.1318d0 * nuP)**2))**7 * &
+					 DEXP(5.339d0 - DSQRT(5.339d0**2 + (2 * nuP)**2))
 	end function
 	
-	function pSFMurcaNR(nuP)
-        implicit none
+    ! YKGH(2001): Eq.(211)
+    function pSFMurcaNR(nuP)
+        !implicit none
 		real(8) :: pSFMurcaNR, nuP
 		real(8) :: a, b
 		
-		a = 0.1477d0 + DSQRT(0.8523**(2.0d0) + (0.1175d0 * nuP)**(2.0d0))
-	    b = 0.1477d0 + DSQRT(0.8523**(2.0d0) + (0.1297d0 * nuP)**(2.0d0))
-		pSFMurcaNR = (a**(7.5d0) + b**(5.5d0)) / 2.0d0 * & 
-					 DEXP(3.4370d0 - DSQRT(3.470d0**(2.0d0) + nuP**(2.0d0))) 
-	end function
+		a = 0.1477d0 + DSQRT(0.8523**2 + (0.1175d0 * nuP)**2)
+	    b = 0.1477d0 + DSQRT(0.8523**2 + (0.1297d0 * nuP)**2)
+		pSFMurcaNR = (a**(7.5d0) + b**(5.5d0)) / 2 * & 
+					 DEXP(3.4370d0 - DSQRT(3.470d0**2 + nuP**2)) 
+    end function
 	
-	function pSFBremNPR(nuP)
-        implicit none
-		real(8) :: pSFBremNPR, nuP
-		real(8) :: a, b
+    function pSFBremNPR(nuP)
+        !implicit none
+        real(8) :: pSFBremNPR, nuP
+        real(8) :: a, b
 		
-		a = 0.9982d0 + DSQRT(0.0018d0**(2.0d0) + (0.3815d0 * nuP)**(2.0d0))
-		b = 0.3949d0 + DSQRT(0.6051d0**(2.0d0) + (0.2666 * nuP)**(2.0d0))
-		pSFBremNPR = (a * DEXP(1.306d0 - DSQRT(1.306d0**(2.0d0) + nuP**(2.0d0))) + &
-			   1.732d0 * b**(7.0d0) * DEXP(3.303d0 - DSQRT(3.303**(2.0d0) + (2 * nuP)**(2.0d0)))) / 2.732d0
-	end function
+        a = 0.9982d0 + DSQRT(0.0018d0**(2.0d0) + (0.3815d0 * nuP)**(2.0d0))
+        b = 0.3949d0 + DSQRT(0.6051d0**(2.0d0) + (0.2666 * nuP)**(2.0d0))
+        pSFBremNPR = (a * DEXP(1.306d0 - DSQRT(1.306d0**(2.0d0) + nuP**(2.0d0))) + &
+                1.732d0 * b**(7.0d0) * DEXP(3.303d0 - DSQRT(3.303**(2.0d0) + (2 * nuP)**(2.0d0)))) / 2.732d0
+    end function
 	
-	function pSFBremPPR(nuP)    
-        implicit none
-		real(8) :: pSFBremPPR, nuP
-		REAL(8) :: c, d
+    function pSFBremPPR(nuP)    
+        !implicit none   
+        real(8) :: pSFBremPPR, nuP
+        real(8) :: c, d
 		
 		c = 0.1747d0 + DSQRT(0.8253d0**(2.0d0) + (0.007933d0 * nuP)**(2.0d0))
-		d = 0.7333d0 + DSQRT(0.2667d0**(2.0d0) + (0.1678d0 * nuP)**(2.0d0))
-		pSFBremPPR = (c**(2.0d0) * DEXP(4.228d0 - DSQRT(4.228d0**(2.0d0) + & 
-		             (2.0d0 * nuP)**(2.0d0))) + &
+        d = 0.7333d0 + DSQRT(0.2667d0**(2.0d0) + (0.1678d0 * nuP)**(2.0d0))
+        pSFBremPPR = (c**(2.0d0) * DEXP(4.228d0 - DSQRT(4.228d0**(2.0d0) + & 
+                     (2.0d0 * nuP)**(2.0d0))) + &
 					 d**(7.5d0) * DEXP(7.762d0 - DSQRT(7.762d0**(2.0d0) + & 
-			        (3.0d0 * nuP)**(2.0d0)))) / 2.0d0
-	end function
+			         (3.0d0 * nuP)**(2.0d0)))) / 2.0d0
+    end function
 
-	function nSFBremNNR(nuN)
-        implicit none
-		real(8) :: nSFBremNNR, nuN
-		nSFBremNNR = pSFBremPPR(nuN)
-	end function
+    function nSFBremNNR(nuN)
+        !implicit none
+        real(8) :: nSFBremNNR, nuN
+        nSFBremNNR = pSFBremPPR(nuN)
+    end function
 	
 	!????????????????????????????????????
-	function nSFBremNPR(nuN)
-        implicit none
-		real(8) :: nSFBremNPR, nuN
-		nSFBremNPR = pSFBremNPR(nuN)
-	end function
+    function nSFBremNPR(nuN)
+        !implicit none
+        real(8) :: nSFBremNPR, nuN
+        nSFBremNPR = pSFBremNPR(nuN)
+    end function
 	
  end module

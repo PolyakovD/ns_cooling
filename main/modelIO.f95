@@ -1,39 +1,47 @@
-! Needs to be linked with: mechanicalModel.f95 mechanicalModelIO.f95 sfgaps.f
+! Needs to be linked with: mechanicalModel.f95 mechanicalModelIO.f95 sfgaps.f betaTable.f95 
+!                          model.f95 sphericalHeatEquation.f95 sphericalHeatEquation.f95
 ! This module is interface for model
 module modelIO
 
+use mechanicalModelIO 
 use model
+use betaTable
+use sphericalHeatEquationIO
+use sphericalHeatEquation
 
 implicit none
     
     type(mModel), private :: mM
     type(heatEquation), private :: hE
     
-    real(8), private :: sigma
+    real(8), private :: sigma, initialTau
     
     integer(4), private :: spatialKnotsNumber
     
-    integer(4), private :: KEOS
+    integer(4), private :: KEOS, isDeep
     
-    real(8), private, allocatable, dimension(:) :: rhoDistribution ! for SF curves
-    real(8), private, allocatable, dimension(:) :: spatialKnots ! for SHE conditions
+    real(8), private, allocatable :: rhoDistribution(:) ! for SF curves
+    real(8), private, allocatable :: spatialKnots(:) ! for SHE conditions
 	character(len = 2000) :: mMDescription ! for knit subroutines
     character(len = 200) :: SFDescription  ! for knit subroutines
     integer(4) :: neutronTripletSFModel, neutronSingletSFModel, protonSFModel !for knit subroutines
     
     ! input files
-    character(len = 50), private :: configFile = 'inputData\\configFile.txt'                ! file with two keys (for frozenStep and lockalHeating)
+    character(len = 50), private :: configFile = 'inputData\\configFile.txt'                ! file with (for \sigma, \tau_{0}, frozenStepKey and lockalHeatingKey)
     character(len = 50), private :: mechanicalInput = 'mechanicalData\\mechanicalInput.txt' ! file with KEOS, rhoC, EPSMASS
+    character(len = 50), private :: borderConditionInput = 'tb_ts_rho8_fixed.dat'           ! config file for border conditions 
     character(len = 50), private :: superfluidFile = 'inputData\\superfluid.txt'            ! file with numbers of superfluid model for nt, ns and ps respectively
     character(len = 50), private :: frozenStepFile = 'inputData\\frozenStep.txt'            ! file with frozen conditions
     character(len = 50), private :: lockalHeatingFile = 'inputData\\lockalHeating.txt'      ! file with lockal heating configuration
     ! output files
     character(len = 50), private :: mechanicalOutput = 'outputData\\mechanicalOutput.txt'   ! file for mechanical structure
     character(len = 50), private :: fileForHeatEquation = 'inputData\\conditions.txt'       ! file for SHE
-    character(len = 50), private :: finalOutputfile = 'outputData\\result.txt'              ! We will write here the solution with rhoDistribution
-    character(len = 50), private :: heatOutputfile = 'outputData\\heatResult.txt'           ! file with thermal solution U(r)
-    character(len = 50), private :: fluxFile = 'outputData\\surfaceFlux.txt'                ! file with thermal flux and neutrino losses
-    character(len = 50), private :: finalFluxFile = 'outputData\\resultFlux.txt'            ! we will write here flux and losses with description
+    character(len = 50), private :: outputfile = 'outputData\\result.txt'              ! We will write here the solution with rhoDistribution
+    !!!! only for testModel
+    character(len = 50), private :: heatOutputfile = 'outputData\\heatResult.txt'            ! file with thermal solution U(r)
+    !!!!
+    !character(len = 50), private :: fluxFile = 'outputData\\surfaceFlux.txt'                ! file with thermal flux and neutrino losses
+    character(len = 50), private :: outputfileForFlux = 'outputData\\resultFlux.txt'         ! we will write here flux and losses with description
        
     integer(4), private, parameter :: fout = 101, fin = 201
     integer(4) :: i, frozenKey, lockalKey, SFKey
@@ -46,7 +54,7 @@ contains
         
         ! Let's read configuration
         open(fin, file = configFile)
-        read(fin, *) sigma, frozenKey, lockalKey, SFKey
+        read(fin, *) sigma, initialTau, frozenKey, lockalKey, SFKey
         close(fin)
         
         ! Let's create the conditions for SHE 
@@ -71,8 +79,14 @@ contains
         read(*, *) sigma
         do while ((sigma < 0.0d0) .OR. (sigma > 1.0d0))
             write(*, *) 'sigma must lie in interval (0, 1)'
-            read(*, *) sigma
-            
+            read(*, *) sigma         
+        end do
+        
+        write(*, *) 'Enter the intial dt'
+        read(*, *) initialTau
+        do while (initialTau < 0.0d0)
+            write(*, *) 'initialTau must be positive'
+            read(*, *) initialTau       
         end do
         
         write(*, *) 'Write "y" if you have frozen initial step in "frozenStep.txt" or "n" if you haven`t'
@@ -121,20 +135,36 @@ contains
         call estimateSFCriticalTemperature(.FALSE.)
     end subroutine
     
+    ! prepares difference scheme ans runs the solution
     subroutine makeSolution()        
+        real(8) :: stellarMass, g14, stellarRadius ! for border conditions
+        
+        stellarMass = getStellarMass(mM) ! for borderCondition grid
+        g14 = getG14(mM) ! for old beta approximation
+        stellarRadius = getRadius(mM) ! for old beta approximation
+       
+        ! construct border condition
+        call constructGridFromFile(borderConditionInput, spatialKnots(spatialKnotsNumber), &
+                                   stellarMass, stellarRadius, g14)
+        
         call constructSHEFromFile(hE, fileForHeatEquation)
-        call hESolution(hE, conductivity02, sources02, capacity02, beta03, getSurfaceTemperatureFromBeta03, &
-                        relativisticFactors02, heatOutputfile)
-	
-        call knitSolutions()
-        call knitFlux()     
+        call preapareFiles() ! write mechanical and SF parametera to result file
+        if (isDeep .EQ. 1) then
+            call hESolution(hE, conductivity02, sources02, capacity02, beta03, getSurfaceTemperatureFromBeta03, &
+                            relativisticFactors02, outputfile, outputfileForFlux)
+        else 
+            call hESolution(hE, conductivity02, sources02, capacity02, beta04, getSurfaceTemperatureFromBeta04, &
+                            relativisticFactors02, outputfile, outputfileForFlux)
+        end if
+        !call knitSolutions()
+        !call knitFlux()     
     end subroutine
     
     ! estimate mechanical model, set it to model.f95 and write to file
     subroutine estimateMM(fileIsSource)
         logical :: fileIsSource
-        real(8), allocatable, dimension(:) :: pressureDistribution, & ! output distributions
-                                              redshiftFactor, volumeFactor
+        real(8), allocatable, dimension(:) :: pressureDistribution, &
+                                              redshiftFactor, volumeFactor ! output distributions
         real(8) :: radius, g14
         
         if (fileIsSource) then
@@ -146,7 +176,8 @@ contains
         call validateModel(mM)
 		mMDescription = getMMDescription(mM)
         call getMMStructure(mM, spatialKnotsNumber, spatialKnots, rhoDistribution, pressureDistribution, &
-                          redshiftFactor, volumeFactor, KEOS, radius, g14)
+                          redshiftFactor, volumeFactor, KEOS, isDeep, radius, g14)
+        
         call setMMechanical(spatialKnotsNumber, spatialKnots, rhoDistribution, pressureDistribution, &
                           redshiftFactor, volumeFactor, KEOS, radius, g14)
         call printMechanicalModel()        
@@ -156,10 +187,10 @@ contains
     subroutine createConditionsForSHE()
         integer(4), parameter :: frozenFin = 301
         integer(4) :: frozenSpatialKnotsNumber
-        real(8) :: time, timeInYear, radius, thermal, capacity, conductivity, sources
+        real(8) :: time, timeInYear, radius, rho, thermal, capacity, conductivity, sources, gridFluxes
         
         open(fout, file = fileForHeatEquation)
-        write(fout, *) sigma
+        write(fout, *) sigma, initialTau
         
         if (frozenKey == 1) then
             open(frozenFin, file = frozenStepFile)
@@ -171,12 +202,12 @@ contains
                 stop 'model: Initial conditions inconsistent with mechanical model'
             end if
             
-            read(frozenFin, *) time, timeInYear, radius, thermal, capacity, conductivity, sources
+            read(frozenFin, *) time, timeInYear, radius, rho, thermal, capacity, conductivity, sources, gridFluxes
             write(fout, '(i8, 5x, e19.8)') spatialKnotsNumber, time
-            write(fout, '(e18.7, 5x, e25.12)') spatialKnots(1), thermal
+            write(fout, '(e18.7, 5x, e25.12, 5x, e25.12)') radius, rho,  thermal
             do i = 2, spatialKnotsNumber
-                read(frozenFin, *) time, timeInYear, radius, thermal, capacity, conductivity, sources
-                write(fout, '(e18.7, 5x, e25.12)') spatialKnots(i), thermal
+                read(frozenFin, *) time, timeInYear, radius, rho, thermal, capacity, conductivity, sources, gridFluxes
+                write(fout, '(e18.7, 5x, e25.12, 5x, e25.12)') radius, rho, thermal
             end do
             
             close(frozenFin)
@@ -184,7 +215,7 @@ contains
             write(fout, '(i8, 5x, e12.7)') spatialKnotsNumber, 0.0d0
             !initial distribution
             do i = 1, spatialKnotsNumber
-                write(fout, '(e18.7, 5x, e25.12)') spatialKnots(i), 1.0d10
+                write(fout, '(e18.7, 5x, e25.12, 5x, e25.12)') spatialKnots(i), rhoDistribution(i), 1.0d10
             end do
         end if
         close(fout)
@@ -242,7 +273,10 @@ contains
         end if
     end subroutine
     
-    ! estimate SF critical temperatures
+    ! estimate SF critical temperatures from model numbers
+    ! Input: fileIsSource 
+    !        fileIsSource == TRUE --> read model numbers from superfluidFile
+    !        fileIsSource == FALSE --> read model numbers from command line
     subroutine estimateSFCriticalTemperature(fileIsSource)
         logical :: fileIsSource
         
@@ -260,7 +294,7 @@ contains
                 call setCurvesTypesFromCL()
             endif
 		
-            call SFCURV(KEOS, neutronTripletSFModel, spatialKnotsNumber, rhoDistribution, neutron3P2Tc)
+            call SFCURV(KEOS, neutronTripletSFModel, spatialKnotsNumber, rhoDistribution, neutron3P2Tc) ! called from sfgaps.f
             call SFCURV(KEOS, neutronSingletSFModel, spatialKnotsNumber, rhoDistribution, neutron1S0Tc)
             call SFCURV(KEOS, protonSFModel, spatialKnotsNumber, rhoDistribution, proton1S0Tc)
          
@@ -273,22 +307,26 @@ contains
         end if
         
         SFDescription = getMSFDescription()
-        call setSFCurves(neutron3P2Tc, neutron1S0Tc, proton1S0Tc)      
-    end subroutine
-    
-    subroutine setCurvesTypesFromCL()
-        write(*, *) 'Please, enter the SF type`s numbers for n3P2, n1S0, p1S0 in single line'
-        write(*, *) 'n3P2 = 19 ... 26  n1S0 = 1 ... 9  p1S0 = 10 ... 18' 
-        read(*, *) neutronTripletSFModel, neutronSingletSFModel, protonSFModel
-        do while((neutronTripletSFModel < 19) .OR. (neutronTripletSFModel > 26) .OR. &
-              (neutronSingletSFModel < 1) .OR. (neutronSingletSFModel > 9) .OR. &
-              (protonSFModel < 10) .OR. (protonSFModel > 18))
-            write(*, *) 'n3P2 = 19 ... 26  n1S0 = 1 ... 9  p1S0 = 10 ... 18'
+        call setSFCurves(neutron3P2Tc, neutron1S0Tc, proton1S0Tc)    
+
+        contains
+        
+        subroutine setCurvesTypesFromCL()
+            write(*, *) 'Please, enter the SF type`s numbers for n3P2, n1S0, p1S0 in single line'
+            write(*, *) 'n3P2 = 19 ... 26  n1S0 = 1 ... 9  p1S0 = 10 ... 18' 
+            write(*, *) 'See gaps.d for more details'
             read(*, *) neutronTripletSFModel, neutronSingletSFModel, protonSFModel
-        end do
-        write(*, *) 'Problem parameters is set successfully'
+            do while((neutronTripletSFModel < 19) .OR. (neutronTripletSFModel > 26) .OR. &
+                  (neutronSingletSFModel < 1) .OR. (neutronSingletSFModel > 9) .OR. &
+                  (protonSFModel < 10) .OR. (protonSFModel > 18))
+                write(*, *) 'n3P2 = 19 ... 26  n1S0 = 1 ... 9  p1S0 = 10 ... 18'
+                read(*, *) neutronTripletSFModel, neutronSingletSFModel, protonSFModel
+            end do
+            write(*, *) 'Problem parameters is set successfully'
+        end subroutine
     end subroutine
     
+    ! returns mechanical model description
     function getMSFDescription()
         character(len = 200) :: getMSFDescription
         if (SFKey == 1) then
@@ -302,67 +340,92 @@ contains
         end if
     end function
     
+    ! prints mechanical model to mechanicalOutput
     subroutine printMechanicalModel()
         call printMm(mM, mechanicalOutput)
     end subroutine
 	
-	subroutine knitSolutions()
-        integer :: Nout
-        integer :: j
-        real(8) :: time, timeInYear, radius, thermal, capacity, conductivity, sources
-        
-        open(fin, file = heatOutputfile)
-        open(fout, file = finalOutputfile)
+    ! write descriptions for file with solutions
+    subroutine preapareFiles()
+        open(fout, file = outputfile)
         
         write(fout, '(a)') mMDescription
         write(fout, '(a, e12.6)') ' sigma = ', sigma
         write(fout, '(a)') SFDescription
         write(fout, '(a)') '#' 
-        write(fout, '(i8)') spatialKnotsNumber 
-        
-        read(fin, *) Nout
- 
-        do i = 1, Nout
-            write(fout, '(a, a)') '   time           timeInYear       radius         rho            temperature     capacity', &
-                   '       conductivity       sources'
-            do j = 1, spatialKnotsNumber
-                read(fin, *) time, timeInYear, radius, thermal, capacity, conductivity, sources
-                write(fout, '(e15.6, e15.6, e15.6, e15.6, e18.8, e15.6, e15.6, e15.6)') time, timeInYear, radius, & 
-                      rhoDistribution(j), thermal, capacity, conductivity, sources
-            end do
-        end do
+        write(fout, '(i8)') spatialKnotsNumber
         
         close(fout)
-        close(fin)
         
-    end subroutine 
-    
-	subroutine knitFlux()
-        character :: columns
-        integer(4) :: stepNumbers
-        real(8) :: time, timeInYear, surfaceFlux, Tg, Ts, neutrinoLosses  
-        
-        open(fin, file = fluxFile)
-        open(fout, file = finalFluxFile)
+        open(fout, file = outputfileForFlux)
         
         write(fout, '(a)') mMDescription
         write(fout, '(a, e12.6)') ' sigma = ', sigma
         write(fout, '(a)') SFDescription
-        write(fout, '(a)') '   time                timeInYear       surfaceFlux    Tg = 10d10 g/cc       Ts    &
-                                        neutrinoLosses'
-        
-        read(fin, *) columns
-        read(fin, *) stepNumbers
-
-        do i = 1, stepNumbers
-            read(fin, *) time, timeInYear, surfaceFlux, Tg, Ts, neutrinoLosses
-            write(fout, '(e22.13, e15.6, e15.6, e15.6, e15.6, e15.6)') time, timeInYear, &
-                                    surfaceFlux, Tg, Ts, neutrinoLosses
-        end do
+        write(fout, '(a)') '#' 
         
         close(fout)
-        close(fin)
-        
     end subroutine
+    
+    ! knits solution on the grid with description
+	!subroutine knitSolutions()
+    !    integer :: Nout
+    !    integer :: j
+    !    real(8) :: time, timeInYear, radius, thermal, capacity, conductivity, sources
+        
+    !    open(fin, file = heatOutputfile)
+    !    open(fout, file = finalOutputfile)
+        
+    !    write(fout, '(a)') mMDescription
+    !    write(fout, '(a, e12.6)') ' sigma = ', sigma
+    !    write(fout, '(a)') SFDescription
+    !    write(fout, '(a)') '#' 
+    !    write(fout, '(i8)') spatialKnotsNumber 
+        
+    !    read(fin, *) Nout
+ 
+    !    do i = 1, Nout
+    !        write(fout, '(a, a)') '   time           timeInYear       radius         rho            temperature     capacity', &
+    !               '       conductivity       sources'
+    !        do j = 1, spatialKnotsNumber
+    !            read(fin, *) time, timeInYear, radius, thermal, capacity, conductivity, sources
+    !            write(fout, '(e15.6, e15.6, e15.6, e15.6, e18.8, e15.6, e15.6, e15.6)') time, timeInYear, radius, & 
+    !                  rhoDistribution(j), thermal, capacity, conductivity, sources
+    !        end do
+    !    end do
+        
+    !    close(fout)
+    !    close(fin)
+        
+    !end subroutine 
+    
+    ! knits heat flux from surface with description 
+	!subroutine knitFlux()
+    !    character :: columns
+    !    integer(4) :: stepNumbers
+    !    real(8) :: time, timeInYear, surfaceFlux, Tg, Ts, neutrinoLosses  
+        
+    !    open(fin, file = fluxFile)
+    !    open(fout, file = finalFluxFile)
+        
+    !    write(fout, '(a)') mMDescription
+    !    write(fout, '(a, e12.6)') ' sigma = ', sigma
+    !    write(fout, '(a)') SFDescription
+    !    write(fout, '(a)') '   time                timeInYear       surfaceFlux    Tg = 10d10 g/cc       Ts    &
+    !                                    neutrinoLosses'
+        
+    !    read(fin, *) columns
+    !    read(fin, *) stepNumbers
+
+    !    do i = 1, stepNumbers
+    !        read(fin, *) time, timeInYear, surfaceFlux, Tg, Ts, neutrinoLosses
+    !        write(fout, '(e22.13, e15.6, e15.6, e15.6, e15.6, e15.6)') time, timeInYear, &
+    !                                surfaceFlux, Tg, Ts, neutrinoLosses
+    !    end do
+        
+    !    close(fout)
+    !    close(fin)
+        
+    !end subroutine
 	
 end module

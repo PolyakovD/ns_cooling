@@ -8,24 +8,25 @@ module mechanicalModel
         
         logical, private :: isDefined = .false.
         
-        integer(4), private :: KEOS !EOS number
+        integer(4), private :: KEOS ! EOS number
+        integer(4), private :: isDeep 
         
-        real(8), private :: epsMass !relative accuracy in total stellar mass 
+        real(8), private :: epsMass ! relative accuracy in total stellar mass 
         
         real(8), private :: centralRho
-        real(8), private :: radius
+        real(8), private :: radius  ! radius on the surface in cm > spatialKnots(spatialKnotsNumber)
         real(8), private :: stellarMass
         real(8), private :: g14
         
         integer(4), private :: spatialKnotsNumber
         
-        real(8), private, allocatable, dimension(:) :: spatialKnots
-        real(8), private, allocatable, dimension(:) :: rhoDistribution
-        real(8), private, allocatable, dimension(:) :: pressureDistribution
-        real(8), private, allocatable, dimension(:) :: lagrangianMass
-        real(8), private, allocatable, dimension(:) :: phiDistribution 
-        real(8), private, allocatable, dimension(:) :: redshiftFactor
-        real(8), private, allocatable, dimension(:) :: volumeFactor
+        real(8), private, allocatable :: spatialKnots(:)
+        real(8), private, allocatable :: rhoDistribution(:)
+        real(8), private, allocatable :: pressureDistribution(:)
+        real(8), private, allocatable :: lagrangianMass(:)
+        real(8), private, allocatable :: phiDistribution(:) 
+        real(8), private, allocatable :: redshiftFactor(:)
+        real(8), private, allocatable :: volumeFactor(:)
         
     end type mModel
     
@@ -37,148 +38,110 @@ contains
     
     subroutine mMConstructor(mM)
         type(mModel) :: mM
-        integer(4) :: i, n
+        integer(4) :: i, j, n
         
         n = mM%spatialKnotsNumber
 
         allocate(mM%phiDistribution(n), mM%redshiftFactor(n), mM%volumeFactor(n))
-        call calculatePhi(150 * mM%spatialKnotsNumber)
+        call calculatePhi02(500 * mM%spatialKnotsNumber)
         call calculateFactors()
        
         mM%isDefined = .true.
 		
         contains
         
-        !This internal subroutine solves differential equation for potential
+        ! This internal subroutine solves differential equation for potential
         ! d Phi / d P = - 1 / (P + rho c^{2})
         ! with the boundary condition of the Schwarzschild
         ! Phi = ln (1 - r_{g} / R) / 2, 
         ! where r_{g} --  gravitational radius
-        subroutine calculatePhi(gridSize)
+        ! this equation equal to d Phi / d t = exp(t) / (exp(t) + rho * c^{2}),
+        ! where t = log p
+        ! the equation is solved by the implicit method of Adams 
+        ! (А.А. Самарский, А.В. Гулин Численные методы М: Наука 1989, стр. 235-236)
+        subroutine calculatePhi02(gridSize)
             integer(4) :: gridSize
-			
-            real(8) :: uniformPressure(gridSize) ! pressure scale gluing from two uniform scales 
-            real(8) :: uniformRho(gridSize) ! rho distribution by the pressure scale
-            real(8) :: uniformPhi(gridSize) ! solution by the pressure scale
-            real(8) :: rightPart(gridSize)  ! right part of equation by the pressure scale
-			
-            real(8) :: rG, dP
+        
+            real(8) :: uniformLogPressure(gridSize) ! log(pressure) distribution
+            real(8) :: uniformRho(gridSize) ! rho distribution by the log(pressure) scale
+            real(8) :: uniformPhi(gridSize) ! solution by the log(pressure) scale
+            real(8) :: rightPart(gridSize) ! right part of equation by the log(pressure) scale
             
-            integer(4) :: bigN
-
-            call getUniformDistributions(uniformPressure, uniformRho, gridSize)
-			
-            rightPart = getRightPart(uniformPressure, uniformRho, gridSize)
-			
-            dP = uniformPressure(gridSize - 1) - uniformPressure(gridSize);
-            rG = 2.0d0 * mM%stellarMass * gG / c**(2.0d0) 
-			
+            real(8) rG, dLogP
+            
+            call getUniformDistributions02(uniformLogPressure, uniformRho, gridSize)
+            
+            rightPart = getRightPart02(uniformLogPressure, uniformRho, gridSize)
+            
+            dLogP = uniformLogPressure(gridSize - 1) - uniformLogPressure(gridSize);
+            rG = 2.0d0 * mM%stellarMass * gG / c**2 
+            
             !Let's start calculation by the interpolation Adams method
             !lucky, we know right part, therefore it will be just
-            
-            !firs we will calculate surface layer
-            uniformPhi(gridSize) = LOG(1.0d0 - rG / mM%radius) / 2.0d0
+            uniformPhi(gridSize) = DLOG(1.0d0 - rG / mM%radius) / 2.0d0
 			
-            uniformPhi(gridSize - 1) = uniformPhi(gridSize) + dP * (rightPart(gridSize) + rightPart(gridSize - 1)) / 2.0d0
+            uniformPhi(gridSize - 1) = uniformPhi(gridSize) + dLogP * (rightPart(gridSize) + rightPart(gridSize - 1)) / 2.0d0
             
-            uniformPhi(gridSize - 2) = uniformPhi(gridSize - 1) + dP / 12.0d0 * &
+            uniformPhi(gridSize - 2) = uniformPhi(gridSize - 1) + dLogP / 12.0d0 * &
                                        (5.0d0 * rightPart(gridSize - 2) + 8.0d0 * rightPart(gridSize - 1) - rightPart(gridSize))
                                       
-            uniformPhi(gridSize - 3) = uniformPhi(gridSize - 2) + dP / 24.0d0 * &
+            uniformPhi(gridSize - 3) = uniformPhi(gridSize - 2) + dLogP / 24.0d0 * &
                                        (9.0d0 * rightPart(gridSize - 3) + 19.0d0 * rightPart(gridSize - 2) - & 
                                         5.0d0 * rightPart(gridSize - 1) + rightPart(gridSize))
-            do i = (gridSize - 4), (gridSize - 400), -1 
-                 uniformPhi(i) = uniformPhi(i + 1) + dP / 720.0d0 * &
+            do i = (gridSize - 4), 1, -1 
+                 uniformPhi(i) = uniformPhi(i + 1) + dLogP / 720.0d0 * &
                                  (251.0d0 * rightPart(i) + 646.0d0 * rightPart(i + 1) - 264.0d0 * rightPart(i + 2) + &
                                   106.0d0 * rightPart(i + 3) - 19.0d0 * rightPart(i + 4))
             end do
             
-            !then calculate remaining part of the star
-            bigN = gridSize - 396
-            dP = uniformPressure(1) - uniformPressure(2)
-            
-            uniformPhi(bigN - 5) = uniformPhi(bigN - 4) + dP / 720.0d0 * &
-                                   (251.0d0 * rightPart(bigN - 5) + 646.0d0 * rightPart(bigN - 4) - & 
-                                    264.0d0 * rightPart(bigN - 4 + 100) + 106.0d0 * rightPart(bigN - 4 + 200) - &
-                                    19.0d0 * rightPart(bigN - 4 + 300))
-            uniformPhi(bigN - 6) = uniformPhi(bigN - 5) + dP / 720.0d0 * &
-                                   (251.0d0 * rightPart(bigN - 6) + 646.0d0 * rightPart(bigN - 5) - & 
-                                    264.0d0 * rightPart(bigN - 4) + 106.0d0 * rightPart(bigN - 4 + 100) - &
-                                    19.0d0 * rightPart(bigN - 4 + 200))
-            uniformPhi(bigN - 7) = uniformPhi(bigN - 6) + dP / 720.0d0 * &
-                                   (251.0d0 * rightPart(bigN - 7) + 646.0d0 * rightPart(bigN - 6) - & 
-                                    264.0d0 * rightPart(bigN - 5) + 106.0d0 * rightPart(bigN - 4) - &
-                                    19.0d0 * rightPart(bigN - 4 + 100))
-           
-            do i = (bigN - 8), 1, -1 
-                 uniformPhi(i) = uniformPhi(i + 1) + dP / 720.0d0 * &
-                                 (251.0d0 * rightPart(i) + 646.0d0 * rightPart(i + 1) - 264.0d0 * rightPart(i + 2) + &
-                                  106.0d0 * rightPart(i + 3) - 19.0d0 * rightPart(i + 4))
-            end do
-            
-            call getPhiFromUniform(uniformPressure, uniformPhi, gridSize)
-
+            call getPhiFromUniform02(uniformLogPressure, uniformPhi, gridSize)
+        
         end subroutine
 		
-        !This internal subroutine makes rho distribution by the pressure scale to
-        !apply the numerical method to solve the differential equation
-        subroutine getUniformDistributions(uniformPressure, uniformRho, gridSize)
-		    integer(4) :: gridSize
-            real(8) :: uniformPressure(gridSize), uniformRho(gridSize)
-			
-            real(8) :: dP
+        ! This internal subroutine makes rho distribution by the log(pressure) scale to
+        ! apply the numerical method to solve the differential equation
+        subroutine getUniformDistributions02(uniformLogPressure, uniformRho, gridSize)
+            integer(4) :: gridSize
+            real(8) :: uniformLogPressure(gridSize), uniformRho(gridSize)
+            
+            real(8) :: dLogP
+            
+            dLogP = (DLOG(mM%pressureDistribution(1)) - DLOG(mM%pressureDistribution(n))) / gridSize
+            uniformLogPressure(1) = DLOG(mM%pressureDistribution(1))
+            do i = 2, gridSize
+                uniformLogPressure(i) = uniformLogPressure(1) - dLogP * (i - 1)
+            end do
 
-            integer(4) :: j
-            integer(4) :: bigN
-            
-            bigN = gridSize - 396
-            dP = (mM%pressureDistribution(1) - mM%pressureDistribution(n)) / (bigN - 1)
-            uniformPressure(1) = mM%pressureDistribution(1)
-            do i = 2, bigN - 4
-                uniformPressure(i) = mM%pressureDistribution(1) - dP * (i - 1)
-            end do
-            
-            dP = dP / 100.0d0
-            
-            do i = 1, 400
-                uniformPressure(bigN - 4 + i) = uniformPressure(bigN - 4) - dP * i 
-            end do
-            
             uniformRho(1) = mM%rhoDistribution(1)
             uniformRho(gridSize) = mM%rhoDistribution(n)
             j = 1
             do i = 2, gridSize - 1
-                do while (mM%pressureDistribution(j + 1) > uniformPressure(i)) 
+                do while (mM%pressureDistribution(j + 1) > DEXP(uniformLogPressure(i))) 
                     j = j + 1
                 end do
-                uniformRho(i) = mM%rhoDistribution(j) * (uniformPressure(i) - mM%pressureDistribution(j + 1)) + &
-				                mM%rhoDistribution(j + 1) * (mM%pressureDistribution(j) - uniformPressure(i))
+                uniformRho(i) = mM%rhoDistribution(j) * (DEXP(uniformLogPressure(i)) - mM%pressureDistribution(j + 1)) + &
+				                mM%rhoDistribution(j + 1) * (mM%pressureDistribution(j) - DEXP(uniformLogPressure(i)))
                 uniformRho(i) = uniformRho(i) / (mM%pressureDistribution(j) - mM%pressureDistribution(j + 1))
             end do
             
         end subroutine
 		
-        !This internal function calculates right part of differential equation
-        function getRightPart(uniformPressure, uniformRho, gridSize)
+        function getRightPart02(uniformLogPressure, uniformRho, gridSize)
             integer(4) :: gridSize
-            real(8) :: uniformPressure(gridSize), uniformRho(gridSize)
-            
-            real(8) :: getRightPart(gridSize)
+            real(8) :: uniformLogPressure(gridSize), uniformRho(gridSize)
+        
+            real(8) :: getRightPart02(gridSize)
             
             do i = 1, gridSize
-                getRightPart(i) = -1.0d0 / (uniformPressure(i) + uniformRho(i) * c**(2.0d0)) 
-                !!!!
-                if (getRightPart(i) > 0.0d0) then
-                    write(*,*) 'rightPart ', i, '  ', getRightPart(i)
-                end if
-                !!!!
+                getRightPart02(i) = -DEXP(uniformLogPressure(i)) / & 
+                                  (DEXP(uniformLogPressure(i)) + uniformRho(i) * c**2) 
             end do
             
-		end function
+        end function
         
-        subroutine getPhiFromUniform(uniformPressure, uniformPhi, gridSize)
+        subroutine getPhiFromUniform02(uniformLogPressure, uniformPhi, gridSize)
             integer(4) :: gridSize
-            real(8) :: uniformPressure(gridSize), uniformPhi(gridSize)
+            real(8) :: uniformLogPressure(gridSize), uniformPhi(gridSize)
             
             integer(4) :: j
 
@@ -187,12 +150,13 @@ contains
 
             j = 1
             do i = 2, n - 1
-                do while (uniformPressure(j + 1) > mM%pressureDistribution(i))
+                do while (DEXP(uniformLogPressure(j + 1)) > mM%pressureDistribution(i))
                     j = j + 1
                 end do
-                mM%phiDistribution(i) = uniformPhi(j) * (mM%pressureDistribution(i) - uniformPressure(j + 1)) + &
-                                        uniformPhi(j + 1) * (uniformPressure(j) - mM%pressureDistribution(i))
-                mM%phiDistribution(i) = mM%phiDistribution(i) / (uniformPressure(j) - uniformPressure(j + 1))
+                mM%phiDistribution(i) = uniformPhi(j) * (mM%pressureDistribution(i) - DEXP(uniformLogPressure(j + 1))) + &
+                                        uniformPhi(j + 1) * (DEXP(uniformLogPressure(j)) - mM%pressureDistribution(i))
+                mM%phiDistribution(i) = mM%phiDistribution(i) / & 
+                                        (DEXP(uniformLogPressure(j)) - DEXP(uniformLogPressure(j + 1)))
             end do
             
         end subroutine 
@@ -211,24 +175,25 @@ contains
          
     end subroutine
 	
-    !Input: mM - the mechanical structure of the star
-    !Output: spatialKnotsNumber - the number of grid nodes in mM
+    ! Input: mM - the mechanical structure of the star
+    ! Output: spatialKnotsNumber - the number of grid nodes in mM
     !        spatialKnot - the grid nodes
     !        rhoDistribution - the distribution of mass in the star
     !        pressureDistribution - the distribution of pressure in the star
     !        redshiftFactor - distribution of redshift relativistic factor in the star
     !        volumeFactor - distribution of volume relativistic factor in the star
     !        myKEOS - EOS number 
+    !        isDeep - model depth('1' equal to 10^{10}g/cc, other equal to 10^{8}g/cc)
     !        radius - stellar radius in cm 
     !        g14 - local gravitational acceleration in 10^{14} cm/s^2
     subroutine getMMStructure(mM, spatialKnotsNumber, spatialKnots, rhoDistribution, pressureDistribution, &
-                            redshiftFactor, volumeFactor, myKEOS, radius, g14)
+                            redshiftFactor, volumeFactor, myKEOS, isDeep, radius, g14)
         type(mModel) :: mM ! input model
         
         integer(4) :: spatialKnotsNumber 
         real(8), allocatable, dimension(:) :: spatialKnots, rhoDistribution, pressureDistribution, & ! output distributions
                                               redshiftFactor, volumeFactor
-        integer(4) :: myKEOS 
+        integer(4) :: myKEOS, isDeep
         real(8) :: radius, g14
         
         integer(4) :: n 
@@ -243,6 +208,7 @@ contains
         redshiftFactor = mM%redshiftFactor
         volumeFactor = mM%volumeFactor
 		myKEOS = mM%KEOS
+        isDeep = mM%isDeep
         radius = mM%radius
         g14 = mM%g14
         
@@ -312,12 +278,20 @@ contains
         
     end subroutine
     
-    subroutine setMMInputParameters(mM, KEOS, centralRho, epsMass)
+    subroutine setMMInputParameters(mM, KEOS, isDeep, centralRho, epsMass)
         type(mModel) :: mM
-        integer :: KEOS
+        integer :: KEOS, isDeep
         real(8) :: centralRho, epsMass
         
+        if (centralRho < 5.0d+13) then
+            write(*, *) 'mechanicalModel:Warning: centralRho = ', centralRho
+        end if
+        if (epsMass > 5.0d-6) then
+            write(*, *) 'mechanicalModel:Warning: epsMass = ', epsMass
+        end if
+        
         mM%KEOS = KEOS
+        mM%isDeep = isDeep
         mM%centralRho = centralRho
         mM%epsMass = epsMass
         
@@ -335,6 +309,8 @@ contains
     
     end subroutine
     
+    ! Input: mM - our completed mechanicalModel
+    ! Output: Qpl - neutrino emission rate in erg/(s cm^3)
     subroutine setDistParameters(mM, spatialKnots, rhoDistribution, pressureDistribution, lagrangianMass)
         type(mModel) :: mM
         real(8) :: rhoDistribution(mM%spatialKnotsNumber), pressureDistribution(mM%spatialKnotsNumber), &

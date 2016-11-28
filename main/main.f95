@@ -2,12 +2,13 @@
 program program1
     !use testModel and model separately to avoid naming collisions. 
     !use testModel
-    use model
     use modelIO
 	
 	implicit none
    
+    !!!! to build the model from files 
     !call conditionGeneratorFromFiles()
+    !!!! to build the model from command line
     call conditionGeneratorFromCL()
     call makeSolution()
     

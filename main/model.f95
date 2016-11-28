@@ -1,20 +1,16 @@
-! Needs to be linked with: mechanicalModel.f95 mechanicalModelIO.f95 cvfull.f condBSk21.f neutrinos.f95
-!                          compos21.f sfgaps.f
+! Needs to be linked with: cvfull.f condBSk21.f neutrinos.f95 calculations.f95
+!                          compos21.f sfgaps.f condcore.f reducv.f bskfit.f neucore.f
 module model
 
-use coreConductivity
-use mechanicalModelIO
-use mechanicalModel
 use neutrinos
-use sphericalHeatEquationIO
-use sphericalHeatEquation
+use calculations
 
 implicit none
 
     integer(4), private :: spatialKnotsNumber
        
 	integer(4), private :: KEOS 
-    real(8), private :: stellarRadius ! in cm
+    real(8), private :: stellarRadius ! radius on the surface in cm > spatialKnots(spatialKnotsNumber)
     real(8), private :: g14 
 	 
     real(8), private, allocatable, dimension(:) :: spatialKnots
@@ -49,6 +45,7 @@ implicit none
     real(8), public, parameter :: K_BOLTAZMANN = 1.3806488d-16
     real(8), public, parameter :: XNC = .0809 ! number density of baryons in fm^{-3} at the crust/core 
                                               ! interface (Pearson et al. 2012)
+    real(8), private, parameter :: c = 3.0d+10
 
 contains 
 
@@ -60,17 +57,20 @@ contains
         real(8) :: conductivity02(2 : spatialKnotsNumber), thermal(spatialKnotsNumber)
         real(8) :: timeKnot
 		
-        !for core conductivity
-        real(8) rho, XN !for BsKNofR
+        ! for core conductivity
+        real(8) rho, XN ! for BsKNofR
 		
-        real(8) T
-        real(8) Ye, Ymu !for FRACORE
-        real(8) Yp
+        real(8) T9
+        real(8) Ye, Ymu ! for FRACORE
+        real(8) Yp, Yn
         real(8) nE, nMu, nP ! electron, muon and proton number density in [fm -3]
+        real(8) Tcp9, Tcn9 ! SF critical temperature T_c for protons and neutrons respectively
 		
         real(8) EFMp, EFMn ! for EFFMASS
 		
-        !for crust conductivity
+        real(8) CKAPn, CKAPe, CKAPmu
+		
+        ! for crust conductivity
         real(8) Tlg, RHOlg
         real(8) SIGMA, SIGMAT, SIGMAH
         real(8) CKAPPA, CKAPPAT, CKAPPAH
@@ -83,18 +83,21 @@ contains
         ! Let's estimate conductivity in core
         do i = 2, (coreCrustBorder - 1) 
             rho = (rhoDistribution(i) + rhoDistribution(i - 1)) / 2.0d0
-            T = (thermal(i) + thermal(i - 1)) / 2.0d0
+            T9 = (thermal(i) + thermal(i - 1)) / 2.0d9
+            Tcn9 = (neutron3P2Tc(i) + neutron3P2Tc(i - 1)) / 2.0d9
+            Tcp9 = (proton1S0Tc(i) + proton1S0Tc(i - 1)) / 2.0d9
 			
-            call BSkNofR(21, rho, XN)
-            call FRACORE(21, XN, Ye, Ymu)
+            call BSkNofR(21, rho, XN) ! called from bskfit.f
+            call FRACORE(21, XN, Ye, Ymu) ! called from bskfit.f
             Yp = Ye + Ymu
+            Yn = 1 - Yp
             nE = XN * Ye
             nMu = XN * Ymu
             nP = XN * Yp
-            call EFFMASS(21, XN, Yp, EFMp, EFMn)
+            call EFFMASS(21, XN, Yp, EFMp, EFMn) ! called from compos21.f
 			
-            call eMuConductivity(T, proton1S0Tc(i), nE, nMu, nP, EFMp, conductivity02(i))
-            
+            call CONDCO(XN, Yn, Yp, Ye, Ymu, T9, Tcp9, Tcn9, EFMn, EFMp, 1, CKAPn, CKAPe, CKAPmu) !called from condcore.f
+            conductivity02(i) = CKAPn + CKAPe + CKAPmu
         end do
 		
         ! Let's estimate conductivity in crust
@@ -110,7 +113,7 @@ contains
             conductivity02(i) = CKAPPA
         end do
     end function
-    
+   
     function sources02(thermal, spatialKnotsNumber, timeKnot)
         integer(4) :: spatialKnotsNumber
         real(8) :: sources02(spatialKnotsNumber), thermal(spatialKnotsNumber)
@@ -134,28 +137,27 @@ contains
         real(8) :: Qbr     ! neutrino emission rate in erg/(s cm^3)   
         ! Neutrino emission due to Cooper pairing of neutrons in star crust:
         ! YKGH(2001): (236), (241)
-		real(8) :: QCPCrustNN ! neutrino emission rate in erg/(s cm^3)
-        
+        real(8) :: QCPCrustNN ! neutrino emission rate in erg/(s cm^3)
+    
         ! emissivity in the core
-		! superfluidReductionFactors(T, Tcp, Tcn, RD, RMn, RMp, Rnn, Rnp, Rpp)
         ! threshold critical density for nucleon direct Urca process
-        real(8), parameter :: RHO_CRIT1 = 8.2d14
+        !real(8), parameter :: RHO_CRIT1 = 1.298d15
 		! reduction factors
-		real(8) :: RD, RMn, RMp, Rnn, Rnp, Rpp
+        real(8) :: RD, RMn, RMp, Rnn, Rnp, Rpp
         ! Neutrino emission due to nucleon direct Urka process in nonesuperfluid case: YKGH(2001):Eq.(120)
         real(8) :: T9      ! T9 = thermal(i) / 10^{9}
         real(8) :: Ymu     ! number of muons divided by number of nucleons
-        real(8) :: Yp      ! protons fraction
+        real(8) :: Yp, Yn      ! protons and neutrons fractions
         real(8) :: EFMp, EFMn    ! effective proton and neutron mass factors(mP*/mP) ,(mN*/mN), respectively 
-        real(8) :: QDUP     ! neutrino emission rate in erg/(s cm^3)
+        real(8) :: QDUe, QDUmu     ! neutrino emission rate in erg/(s cm^3)
         ! Neutrino emission due to nucleon modified Urka process in nonesuperfluid case:
         ! YKGH(2001): Eq.(140), Eq.(142) with theta_{Mp} = 1
         real(8) :: nP, nN   ! proton and neutron number density in fm^{-3}
         real(8) :: pFP, pFN ! proton and neutron Fermi momentum, respectively
-        real(8) :: QMUP     ! neutrino emission rate in erg/(s cm^3)
+        real(8) :: QMUne, QMUpe, QMUnmu, QMUpmu ! neutrino emission rate in erg/(s cm^3)
         ! Neutrino emission due to baryon-baryon collisions in nonesuperfluid case:
         ! YKGH(2001): Eq.(165), Eq.(166), Eq.(167)
-        real(8) :: QBBR     ! neutrino emission rate in erg/(s cm^3)
+        real(8) :: QBnn, QBnp, QBpp     ! neutrino emission rate in erg/(s cm^3)
         ! Neutrino emission due to Cooper pairing of neutrons in star core:
         ! YKGH(2001): Eq.(236), (241)
         real(8) :: QCPCoreNN
@@ -220,7 +222,7 @@ contains
             sources02(i) = sources02(i) - Qbr
             ! Let's find neutrino emission rate due to Cooper pairing of neutrons
             call EFFMASS(21, XN, 0.0d0, EFMp, EFMn)
-            nN = (CMI1 - CMI) * XN / CMI1
+            nN = (CMI1 - CMI) * XN
             pFN = getPF(nN)
             call getQCPCrustNN(thermal(i), neutron1S0Tc(i), EFMn, pFN, xnuc, QCPCrustNN)
             !!!!
@@ -228,13 +230,11 @@ contains
                 write(*, *) i, ' QCPCrustNN'
             end if
             !!!!
-            if (nN > 1.0d-9) then
-                sources02(i) = sources02(i) - QCPCrustNN
-            end if
+            sources02(i) = sources02(i) - QCPCrustNN
             
             i = i - 1
         end do
-        
+                          
 		!neutrino losses in core
         do while(i > 0)
 			!Let's estimate reduction factors
@@ -244,31 +244,22 @@ contains
             call BSkNofR(21, rhoDistribution(i), XN)
             call FRACORE(21, XN, Ye, Ymu)
             Yp = Ye + Ymu
-            nE = XN * Yp
+            Yn = 1 - Yp
+            nP = XN * Yp
+            nN = XN - nP
             call EFFMASS(21, XN, Yp, EFMp, EFMn)
             T9 = thermal(i) / 1.0d9
-                
-            if (rhoDistribution(i) > RHO_CRIT1) then              
-                call getQDUP(nE, T9, EFMp, EFMn, RD, QDUP)
-                sources02(i) = sources02(i) - QDUP
-            endif
-                
-            !Let's find neutrino emission rate due to nucleon modified Urca process
-            nP = nE
-            nN = XN - nP
+                         
             pFE = getPF(nE)
             pFP = getPF(nP)
-            pFN = getPF(nN)
-            call getQMUP(nP, T9, EFMp, EFMn, pFE, pFP, pFN, RMn, RMp, QMUP)
+            pFN = getPF(nN)         
+            !!!!
+            call CORNSF(XN, Yn, Yp, Ye, Ymu, T9, 0.0d0, EFMn, EFMp, &
+                        QDUe, QDUmu, QMUne, QMUpe, QMUnmu, QMUpmu, QBnn, QBnp, QBpp)
+            !!!!
+            sources02(i) = sources02(i) - (QDUe + QDUmu) * RD - (QMUne + QMUnmu) * RMn - &
+                           (QMUpe + QMUpmu) * RMp - QBnn * Rnn - QBnp * Rnp - QBpp * Rpp
             
-            sources02(i) = sources02(i) - QMUP
-               
-            ! Let's find neutrino emission rate due to baryon-baryon collisions
-            call getQBBR(nN, nP, T9, EFMn, EFMp, Rnn, Rnp, Rpp, QBBR)
-                
-            sources02(i) = sources02(i) - QBBR
-            
-            ! Let's find neutrino emission rate due to Cooper pairing of neutrons
             call getQCPCoreNN(thermal(i), neutron3P2Tc(i), EFMn, pFN, QCPCoreNN)
             
             sources02(i) = sources02(i) - QCPCoreNN
@@ -280,7 +271,6 @@ contains
             
             i = i - 1
         end do
-        
         contains
         
         !Input:  n -- number density of some particles in fm^{-3}
@@ -291,7 +281,7 @@ contains
             
             real(8), parameter :: M_PI = 3.141592653589793d0 
             
-            getPF = PLANCK_BAR * (3 * M_PI**(2.0d0) * n * 1.0d39)**(1.0d0 / 3.0d0)
+            getPF = PLANCK_BAR * (3 * M_PI**2 * n * 1.0d39)**(1.0d0 / 3.0d0)
         end function
 
     end function
@@ -308,112 +298,99 @@ contains
         real(8) :: tauN, tauP ! T / Tcn, T / Tcp
         real(8) :: RCVN, RCVP ! neutron and proton superfluidity reduction factors
 	
-        integer(4) i
-        
-        do i = 1, spatialKnotsNumber
+        integer(4) :: i
+        !!!!
+        integer(4) :: j
+        !!!!
+        i = 1
+        T6 = thermal(i) / 1.0d+6
+        RHO = rhoDistribution(i)
+        call BSkNofR(KEOS, RHO, XN)
+        do while (XNC .lt. XN) ! estimate capacity in core
+            call FRACORE(KEOS,XN,Ye,Ymu)
+            Yp = Ye + Ymu
+            Yn = dim(1.d0,Yp)
+            call EFFMASS(KEOS, XN, Yp, EFMp, EFMn)
+            CMI = 1.008 * EFMp ! eff.mass of a proton in a.m.u.
+            CMI1 = 1.d0 / Yp
+            Zion = 1.d0 ! proton charge
+            CVC = 0. ! neglect Coulomb nonideality
+            !!!!
+            if (T6 < 0.0d0) then 
+                write(*, '(a, i6, a, e18.8)') 'in ', i, ' node have negative temperature ', T6 * 1.0d+6 
+            end if
+            !!!!
+            call CVCOR21(XN, T6, B12, Ye, Ymu, EFMp, EFMn, CVtot, CVN, CVI, CVE, CVmu) ! CVI equal CVP in core
+
+            tauN = thermal(i) / neutron3P2Tc(i)
+            call REDUCV(tauN, 3, RCVN)
+            tauP = thermal(i) / proton1S0Tc(i)
+            call REDUCV(tauP, 2, RCVP)
+                 
+            CVtot = (CVE + CVmu + CVI * RCVP + CVN * RCVN)
+            capacity02(i) = CVtot * XN * 1.0d+39 * K_BOLTAZMANN ! cm^{3} == 10^{39} fm^{3}
+            
+            i = i + 1
             T6 = thermal(i) / 1.0d+6
             RHO = rhoDistribution(i)
-           !subroutine CVCRU21(XN,T6,B12,Zion,CMI,CMI1,EFMn,CVtot,CVE,CVI,CVC,CVN)
             call BSkNofR(KEOS, RHO, XN)
-            
-            if (XNC .lt. XN) then ! estimate capacity in core
-                call FRACORE(KEOS,XN,Ye,Ymu)
-                Yp = Ye + Ymu
-                Yn = dim(1.d0,Yp)
-                call EFFMASS(KEOS, XN, Yp, EFMp, EFMn)
-                CMI = 1.008 * EFMp ! eff.mass of a proton in a.m.u.
-                CMI1 = 1.d0 / Yp
-                Zion = 1.d0 ! proton charge
-                CVC = 0. ! neglect Coulomb nonideality
-
-                call CVCOR21(XN, T6, B12, Ye, Ymu, EFMp, EFMn, CVtot, CVN, CVI, CVE, CVmu) ! CVI equal CVP in core
-
-                tauN = thermal(i) / neutron3P2Tc(i)
-                call REDUCV(tauN, 3, RCVN)
-                tauP = thermal(i) / proton1S0Tc(i)
-                call REDUCV(tauP, 2, RCVP)
-                 
-                CVtot = (CVE + CVmu + CVI * RCVP + CVN * RCVN)
-                
-            else ! estimate capacity in crust
-                
-                call CVFULL21(RHO,T6,B12,XN,Zion,CMI,CMI1,Yn,Yp,Ye,Ymu,EFMp,EFMn,CVtot,CVE,CVI,CVC,CVN)
-            
-                call CVCRU21(XN, T6, B12, Zion, CMI, CMI1, EFMn, CVtot, CVE, CVI, CVC, CVN)
-                
-                tauN = thermal(i) / neutron1S0Tc(i)
-                call REDUCV(tauN, 1, RCVN)
-                
-                CVtot = CVtot - CVN
-                CVtot = CVtot + CVN * RCVN
-                
-            end if
-            capacity02(i) = CVtot * XN * 1.0d+39 * K_BOLTAZMANN ! cm^{3} == 10^{39} fm^{3}
         end do
-		
+        !!!! 
+        !do while (i <= spatialKnotsNumber) ! estimate capacity in crust 
+        !    T6 = thermal(i) / 1.0d+6
+        !    RHO = rhoDistribution(i)
+        !    call BSkNofR(KEOS, RHO, XN)
+            
+        !    call CVFULL21(RHO,T6,B12,XN,Zion,CMI,CMI1,Yn,Yp,Ye,Ymu,EFMp,EFMn,CVtot,CVE,CVI,CVC,CVN)
+        !    call CVCRU21(XN, T6, B12, Zion, CMI, CMI1, EFMn, CVtot, CVE, CVI, CVC, CVN)
+    
+        !    tauN = thermal(i) / neutron1S0Tc(i)
+        !    call REDUCV(tauN, 1, RCVN)
+                
+        !    CVtot = CVtot - CVN
+        !    CVtot = CVtot + CVN * RCVN
+            
+        !    j = i
+        !    do while ((j <= spatialKnotsNumber) .AND. (j - 7 < i)) 
+        !        capacity02(j) = CVtot * XN * 1.0d+39 * K_BOLTAZMANN ! cm^{3} == 10^{39} fm^{3}
+        !        j = j + 1
+        !    end do
+        !    i = i + 7
+        !end do
+        !!!!
+        do while (i <= spatialKnotsNumber) ! estimate capacity in crust 
+            T6 = thermal(i) / 1.0d+6
+            RHO = rhoDistribution(i)
+            call BSkNofR(KEOS, RHO, XN)
+            !!!!
+            if (T6 < 0.0d0) then 
+                write(*, '(a, i6, a, e18.8)') 'in ', i, ' node have negative temperature ', T6 * 1.0d+6 
+            end if
+            !!!!    
+            call CVFULL21(RHO,T6,B12,XN,Zion,CMI,CMI1,Yn,Yp,Ye,Ymu,EFMp,EFMn,CVtot,CVE,CVI,CVC,CVN)
+            call CVCRU21(XN, T6, B12, Zion, CMI, CMI1, EFMn, CVtot, CVE, CVI, CVC, CVN)
+    
+            tauN = thermal(i) / neutron1S0Tc(i)
+            call REDUCV(tauN, 1, RCVN)
+                
+            CVtot = CVtot - CVN
+            CVtot = CVtot + CVN * RCVN
+               
+            capacity02(i) = CVtot * XN * 1.0d+39 * K_BOLTAZMANN ! cm^{3} == 10^{39} fm^{3}
+            i = i + 1
+        end do		
     end function
     
-    subroutine relativisticFactors02 (spatialKnotsNumber, currentRedshiftFactor, currentVolumeFactor)
-		integer(4) i
+    ! Returns relativistic factors from model
+    ! Input:  spatialKnotsNumber - number of knots in model grid
+    ! Output: currentRedshiftFactor - spatial distribution of redshift relativistic factor
+    !         currentVolumeFactor - spatial distribution of volume relativistic factor
+    subroutine relativisticFactors02(spatialKnotsNumber, currentRedshiftFactor, currentVolumeFactor)
 		integer(4) :: spatialKnotsNumber
 		real(8) :: currentRedshiftFactor(1 : spatialKnotsNumber), currentVolumeFactor(1 : spatialKnotsNumber)
         currentRedshiftFactor = redshiftFactor
         currentVolumeFactor = volumeFactor
 	end subroutine relativisticFactors02
-	
-	function beta03(thermal, timeKnot)
-		real(8) :: beta03, thermal, timeKnot
-		
-		real(8) :: FB, B12, COSLAT, TS6
-		
-		COSLAT = 0.0d0
-		B12 = 0.0d0
-		
-		call TbTsFb(g14, thermal / 1.0d9, B12, COSLAT, TS6, FB)
-		beta03 = -FB * stellarRadius**(2.0d0) / thermal
-		
-	end function
-	
-	! Input: beta
-    !        T10g - temperature in K at the layer with rho = 10^{10}g/cc
-    ! Output : surfaceTemperature in K
-    !          surfaceFlux in erg/s
-	subroutine getSurfaceTemperatureFromBeta03(beta, T10g, surfaceTemperature, surfaceFlux)
-		real(8) :: beta, T10g
-        real(8) :: surfaceTemperature, surfaceFlux
-		
-		real(8) B12, COSLAT, FB
-		
-		COSLAT = 0.0d0
-		B12 = 0.0d0
-		
-		call TbTsFb(g14, T10g / 1.0d9, B12, COSLAT, surfaceTemperature, FB)
-		surfaceTemperature = surfaceTemperature * 1.0d6
-		surfaceFlux = -FB * 4.0d0 * M_PI * stellarRadius**(2.0d0) 
-		
-	end subroutine
-	
-	! Estimate beta for surface flux GPE(1983): Eq.(32)
-    function beta02(thermal, timeKnot)
-        real(8) :: beta02, thermal, timeKnot
-		
-        beta02 = -stellarRadius**(2.0d0) * STEFAN_BOLTZMANN * thermal**(1.1978d0)
-        beta02 = beta02 * g14 * 10.0d0**(6.4176d0) / 1.7441
-        
-    end function
-    
-    ! Input: beta
-    !        T10g - temperature in K at the layer with rho = 10^{10}g/cc
-    ! Output : surfaceTemperature in K
-    !          surfaceFlux in erg/s
-    subroutine getSurfaceTemperatureFromBeta02(beta, T10g, surfaceTemperature, surfaceFlux)
-        real(8) :: beta, T10g
-        real(8) :: surfaceTemperature, surfaceFlux
-
-        surfaceFlux = beta * T10g * 4.0d0 * M_PI
-        surfaceTemperature = (-surfaceFlux / (4.0d0 * M_PI * stellarRadius**(2.0d0) * STEFAN_BOLTZMANN))**(0.25d0)
-        
-    end subroutine
 
     ! This function estimates the power of local uniform heating 
     ! in the layer of unstable nuclei is limited by the densities 

@@ -1253,8 +1253,8 @@ cc      data AP/1.1857,.663,17.1,40./,PX/.212/ ! for fcc lattice
       save
       parameter(PI=3.141592653d0,EPS=1.d-4)
       parameter(PI2=PI**2)
-      if (CHI.lt..5d0) stop'SOMMERF: non-degenerate (small CHI)'
-      if (TEMR.le.0.d0) stop'SOMMERF: T < 0'
+      if (CHI.lt..5d0) stop'eos14: SOMMERF: non-degenerate (small CHI)'
+      if (TEMR.le.0.d0) stop'eos14: SOMMERF: T < 0'
       CMU1=CHI*TEMR ! chemical potential in rel.units
       CMU=1.d0+CMU1
       call SUBFERMJ(CMU1,
